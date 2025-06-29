@@ -1,9 +1,12 @@
-all: vbr/vbr.bin boot/boot.sys
+all: vbr/vbr.bin boot/boot.sys command/command.com
 
 %.bin: %.asm
 	nasm -f bin -o $@ $^
 
 %.sys: %.asm
+	nasm -f bin -o $@ $^
+
+%.com: %.asm
 	nasm -f bin -o $@ $^
 
 disk.img: all
@@ -12,6 +15,7 @@ disk.img: all
 	dd if=vbr/vbr.bin of=disk.img skip=62c seek=62c bs=1c count=450 conv=notrunc
 	mount -o loop disk.img /mnt
 	find . -name '*.sys' | xargs -I \{} cp \{} /mnt
+	find . -name '*.com' | xargs -I \{} cp \{} /mnt
 	umount /mnt
 
 qemu: disk.img

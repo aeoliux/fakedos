@@ -86,6 +86,8 @@ _start:
 	call read_file
 
 	; set up registers and jump to kernel
+	xor dx, dx
+	mov dl, [Drive]
 	mov bx, 0x2000
 	mov es, bx
 	mov ds, bx
@@ -93,7 +95,6 @@ _start:
 	mov gs, bx
 	mov fs, bx
 	xor bx, bx
-	mov dl, [Drive]
 	jmp 0x2000:0x0
 
 error:
@@ -210,13 +211,15 @@ read_file:
 
 	.done:
 
-	; cluster was marked as bad
-	cmp ax, 0xff7
-	je error
+	; if cluster value is less than 0xFF0, we have next value cluster
+	cmp ax, 0xff0
+	jle read_file
 
-	; if >= to 0xff8, file has been read. Otherwise ax is new cluster
+	; if cluster < 0xff8 && cluster > 0xff0 => bad cluster
 	cmp ax, 0xff8
-	jl read_file
+	jl error
+
+	; otherwise end of the file
 
 	ret
 
@@ -226,6 +229,7 @@ read_file:
 read_disk:
 	; save lba
 	mov ah, 0x2
+	push bx
 	push ax
 	push dx
 
@@ -268,6 +272,7 @@ read_disk:
 	mov dl, [Drive]
 	
 	pop ax ; restore parameters
+	pop bx
 
 	int 0x13
 	jc error
