@@ -1,5 +1,5 @@
 # FakeDOS
-An attempt to make an DOS-like OS which utilizes x86 real mode
+An attempt to make a DOS-like OS which utilizes x86 real mode
 
 ## Bootsector
 Bootsector supports FAT12. It checks for file `boot.sys`, but only at root directory.
