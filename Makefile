@@ -24,4 +24,5 @@ qemu: disk.img
 clean:
 	find . -name '*.bin' -delete
 	find . -name '*.sys' -delete
+	find . -name '*.com' -delete
 	find . -name '*.img' -delete

@@ -11,7 +11,7 @@ _fat12_open:
     mov bx, 0x1
     call _fat12_initialize
     jc .ret
-    call _fat12_find
+    call _fat12_search
     jc .ret
 
     ; fs:ax is now a pointer to FAT directory entry
@@ -42,19 +42,92 @@ _fat12_open:
 
     .al: db 0x0
 
-; TODO!
-_fat12_read:
-    call _fat12_initialize
-    ret
+_fat12_filename_buffer: times 11 db 0x0, '$'
+; ds:dx                         -> source filename
+; gs:_fat12_filename_buffer <-  parsed filename
+_fat12_parse_filename:
+    push es
+    push di
+    push cx
+    push si
+
+    ; es:di = destination buffer
+    mov cx, gs
+    mov es, cx
+    mov di, _fat12_filename_buffer
+    
+    ; 11 bytes to copy and uppercase
+    mov cx, 0xb
+
+    ; copy and uppercase
+    call string_to_uppercase
+
+    ; source for lodsb
+    mov cx, es
+    mov ds, cx
+    mov si, _fat12_filename_buffer
+    .find_dot:
+        lodsb
+        cmp al, '.'
+        je .dot_found
+        cmp si, _fat12_filename_buffer + 0xb
+        jae .not_found
+        jmp .find_dot
+
+    .dot_found:
+        ; now filename looks like `BOOT.SYS` and we need it to be `BOOT    SYS`
+        ; we need to copy `SYS` down to position 8 and add spaces starting at dot's position
+        dec si  ; si - 1 = position of the dot
+        push si ; save dot position on the stack
+        inc si  ; si = position of the file extension
+
+        add si, 0x2                             ; position file extensions' last character
+        mov di, _fat12_filename_buffer + 0xa    ; final desired position of file extension
+        .loop:
+            mov al, [gs:si] ; get first byte
+            mov [gs:di], al ; save it at desired position
+            dec si
+            dec di
+
+            ; check if we copied 3 bytes
+            cmp di, _fat12_filename_buffer + 0x8
+            jae .loop
+
+        pop si
+
+        ; pad rest of filename with spaces
+        ; si = dot position
+        .loop2:
+            mov al, 0x20    ; 0x20 = space char
+            mov [gs:si], al
+            inc si
+            ; check if we copied all bytes until file extension
+            cmp si, _fat12_filename_buffer + 0x8
+            jl .loop2
+
+    .not_found:
+        mov bx, 0x1
+    .ret:
+        pop si
+        pop cx
+        pop di
+        pop es
+        ret
 
 ; fs        -> segment to filesystem data space
 ; ds:dx     -> filename
 ; ax <-     pointer to directory entry
-_fat12_find:
+_fat12_search:
+    push ds
     push es
     push si
     push di
     push dx
+
+    call _fat12_parse_filename
+    mov bx, gs
+    mov ds, bx
+    mov dx, _fat12_filename_buffer
 
     ; we start at first sector of root dir entries
     mov ax, [fs:FAT12_FirstRootDirLba] ; ax = first root dir sector
@@ -171,6 +244,201 @@ _fat12_find:
         pop di
         pop si
         pop es
+        pop ds
+        ret
+
+; fs:FDTable.allocated + si     -> file table entry
+; cx                            -> n of bytes to read
+; ds:dx                         -> destination
+; ds:dx                         <- data read
+_fat12_read:
+    push cx
+    push dx
+    push es
+    push si
+
+    ; initialize FAT data
+    mov bx, 0x1
+    call _fat12_initialize
+    jc .ret
+
+    ; get cluster number
+    mov ax, [fs:FDTable.fsReserved + si]
+
+    ; start reading loop
+    .read_cluster:
+        ; check cluster status
+        cmp ax, 0xff8   ; eof
+        jae .eof
+
+        cmp ax, 0xff7   ; bad
+        je .read_error
+
+        push ax ; save cluster number for future calculations
+        push dx ; save memory offset
+        push cx ; save bytes count
+
+        ; physical cluster = logical - 2
+        sub ax, 0x2
+        ; data sector = S per cluster * physical cluster + first data sector
+        mov bx, [fs:FAT12_SectorsPerCluster]
+        mul bx
+        ; ax = S per cluster * physicall cluster
+        mov bx, [fs:FAT12_FirstDataLba]
+        add ax, bx
+
+        ; we load cluster data into fat buffer
+        mov si, fs
+        mov es, si
+        mov si, FAT12_Buffer
+        mov dx, ax ; lba = data sector
+        mov bx, [fs:FAT12_SectorsPerCluster] ; bl = sectors per cluster
+        call read_disk.lba ; read!
+        jc .read_error
+        pop cx
+
+        ; offset memory: size of sector * sectors per cluster
+        mov ax, [fs:FAT12_SizeOfSector]
+        mov bx, [fs:FAT12_SectorsPerCluster]
+        mul bx
+
+        ; if counter < size of sector * sectors per cluster, we don't read more clusters
+        pop dx
+        cmp cx, ax
+        jbe .all_read
+
+        ; we loaded whole cluster so we're gonna copy it, ax = sectors per cluster * size of sector
+        
+        push cx
+
+        ; copy (sectors per cluster * size of sector) bytes to the destination
+        mov cx, ax
+        call .copy_fat_buffer
+
+        pop cx
+
+        ; counter = counter - (size of sector * sectors per cluster)
+        sub cx, ax
+
+        pop ax                          ; get active cluster
+        call _fat12_get_next_cluster    ; get next cluster for that file
+
+        jmp .read_cluster
+
+    .eof:
+        xor bx, bx
+
+        jmp .ret
+
+    .all_read:
+        call .copy_fat_buffer
+
+        pop dx
+        xor bx, bx
+        jmp .ret
+    
+    .read_error:
+        mov bx, 0x1
+        jmp .ret
+
+    .ret:
+        pop si
+        pop es
+        pop dx
+        pop cx
+        ret
+
+    ; ds:dx     -> destination
+    ; cx        -> bytes count
+    ; dx <-     ds:dx + cx
+    .copy_fat_buffer:
+        push si
+        push di
+        push ds
+
+        ; ds:dx = es:di
+        mov di, ds
+        mov es, di
+        mov di, dx
+
+        ; ds:si = fs:FAT12_Buffer
+        mov si, fs
+        mov ds, si
+        mov si, FAT12_Buffer
+
+        push cx
+        cld
+        rep movsb   ; copy cx bytes
+        pop cx
+
+        pop ds
+        pop di
+        pop si
+
+        add dx, cx
+
+        ret
+
+; ax    -> current cluster
+; ax    <- next cluster
+_fat12_get_next_cluster:
+    push dx
+    push cx
+    push ax
+
+    ; (active cluster / 2) + active cluster = fat offset
+    xor dx, dx
+    mov bx, 0x2
+    div bx          ; ax / bx = active cluster / 2
+    pop bx          ; bx = active cluster
+    push bx         ; save active cluster again
+    add ax, bx      ; active cluster / 2 + active cluster
+    ; ax = fat offset
+
+    ; fat sector = first fat sector + (fat offset / sector size)
+    ; dx:ax / sector size = fat offset / sector size
+    mov bx, [fs:FAT12_SizeOfSector]
+    xor dx, dx
+    div bx      ; ax = fat offset / sector size, dx = fat offset % sector size
+    ; dx is entry offset which we'll use to access cluster information
+    push dx     ; so we save it
+    mov bx, [fs:FAT12_FirstFatLba]
+    add ax, bx  ; ax = fat offset / sector size + first fat sector = fat sector
+
+    ; read FAT now
+    mov dx, ax  ; dx = fat sector
+    mov bl, 0x1
+    push es
+    push si
+    mov si, fs
+    mov es, si
+    mov si, FAT12_Buffer
+    call read_disk.lba
+    pop si
+    pop es
+    pop bx ; get entry offset
+    pop cx ; restore info about active cluster
+    jc .error
+
+    ; get cluster information
+    mov ax, [fs:FAT12_Buffer + bx] ; ax contains cluster info
+
+    ; it is 12-bit value splitted, we need to extract it and make it 16-bit
+    test cx, 0x1
+    jz .even
+
+    ; odd cluster needs to have 4 shifted
+    shr ax, 0x4
+    jmp .ret
+
+    .even: ; even cluster only needs to have first 4 bits zeroed
+    and ax, 0xfff
+    jmp .ret
+
+    .error: stc
+    .ret:
+        pop cx
+        pop dx
         ret
 
 
@@ -191,6 +459,7 @@ _fat12_initialize:
     ; read 1 sector
     mov bl, 0x1
     call read_disk.lba
+
     jc .error
 
     ; n of reserved sectors = first fat LBA
@@ -212,11 +481,20 @@ _fat12_initialize:
     mov cx, FAT12_DirEntrySize
     mul cx                                  ; dx:ax = root dir entries * size of root dir entry (32)
     mov cx, [fs:FAT12_BPB.BytesPerSector]
+    cmp cx, 0x0
+    je .error
     mov [fs:FAT12_SizeOfSector], cx
     div cx                                  ; ax = dx:ax / sector size = root dir entries * size of root dir entry (32) / sector size
     mov dx, [fs:FAT12_FirstRootDirLba]
     add ax, dx
     mov [fs:FAT12_FirstDataLba], ax
+
+    xor ah, ah
+    mov al, [fs:FAT12_BPB.NOfSectorsPerCluster]
+    mov [fs:FAT12_SectorsPerCluster], ax
+
+    mov ax, [fs:FAT12_BPB.NOfSectorsPerFAT]
+    mov [fs:FAT12_SectorsPerFAT], ax
 
     .return:
     pop si
@@ -224,8 +502,10 @@ _fat12_initialize:
     pop dx
     pop cx
     pop ax
+    
     xor bx, bx
-    ret
+    clc
+    ret 
 
     .error:
     pop si
@@ -233,15 +513,18 @@ _fat12_initialize:
     pop dx
     pop cx
     pop ax
+
     stc
     mov bx, 0x1
-    jmp .return
+    ret
 
 ; currently LBA is 16-bit (support for larger drives will be added later)
 ; here it saves some data required for FAT12, because we don't want to have BPB forever loaded in memory
 ; why? memory saving...
 FAT12_SizeOfSector                  equ FilesystemData
-FAT12_FirstFatLba                   equ FAT12_SizeOfSector      + 0x2
+FAT12_SectorsPerCluster             equ FAT12_SizeOfSector      + 0x2
+FAT12_SectorsPerFAT                 equ FAT12_SectorsPerCluster + 0x2
+FAT12_FirstFatLba                   equ FAT12_SectorsPerFAT     + 0x2
 FAT12_FirstRootDirLba               equ FAT12_FirstFatLba       + 0x2
 FAT12_RootDirEntries                equ FAT12_FirstRootDirLba   + 0x2
 FAT12_FirstDataLba                  equ FAT12_RootDirEntries    + 0x2

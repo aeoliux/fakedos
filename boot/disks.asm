@@ -132,9 +132,10 @@ driveId_to_dl:
 ; dh        -> head
 ; es:si     -> destination
 read_disk:
-    mov dl, [Drive.dl]
+    mov dl, [gs:Drive.dl]
     call merge_ch_cl
 
+    push es
     push bx
     mov al, bl
     mov bx, si
@@ -142,6 +143,7 @@ read_disk:
     mov ah, 0x2
     int 0x13
 
+    pop es
     pop bx
     ret
 
@@ -162,8 +164,8 @@ lba_to_chs:
 
     ; C, temp = lba / (n of heads * n of sectors per track)
 	xor dx, dx			;
-	mov ax, [Drive.heads]	; dx:ax = 0:n of heads
-	mov bx, [Drive.spt]	; bx = n of sectors per track
+	mov ax, [gs:Drive.heads]	; dx:ax = 0:n of heads
+	mov bx, [gs:Drive.spt]	; bx = n of sectors per track
 	mul bx	; dx:ax = n of heads * n of sectors per track
 	mov bx, ax	;
 	xor dx, dx	; 0:bx = 0:ax
@@ -174,7 +176,7 @@ lba_to_chs:
 	; H, S - 1 = temp / n of sectors per track
 	mov ax, dx	;
 	xor dx, dx	; dx:ax = temp
-	mov bx, [Drive.spt] ; bx = n of sectors per track
+	mov bx, [gs:Drive.spt] ; bx = n of sectors per track
 	div bx ; ax (H), dx (S - 1) = temp / n of sectors per track
 
 	; S = S - 1 + 1

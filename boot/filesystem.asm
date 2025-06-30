@@ -70,8 +70,18 @@ open_file:
 
 ; bx -> fd
 ; si <- fd entry offset
+; fs <- segment to the table
 calculate_offset_to_fd_entry:
+    cmp bx, FDMaxFiles
+    jl .ok
+    stc
+    ret
+
+    .ok:
     push ax
+    xor ax, ax
+    mov fs, ax
+
     mov ax, bx
     push cx
     push dx
@@ -88,33 +98,22 @@ calculate_offset_to_fd_entry:
 ; ah -> 0x3e
 ; bx -> fd
 close_file:
-    ; error is default
-    mov bx, 0x1
-
     push fs
-    push ax
     push si
-
-    ; set up segment to file table
-    xor ax, ax
-    mov fs, ax
-
-    ; check if fd is a bit too high
-    cmp bx, FDMaxFiles
-    jge .return
-
     ; get offset to file table entry
     call calculate_offset_to_fd_entry
+    jc .return
 
     ; set it as unallocated (the most dumb way, but do you need more?)
     mov [fs:FDTable.allocated + si], al
 
     ; no error here
     xor bx, bx
+    jmp .return
 
+    .error: mov bx, 0x1
     .return:
         pop si
-        pop ax
         pop fs
         retf
 
@@ -125,16 +124,23 @@ close_file:
 ; cx <-     n of bytes read
 read_file: ; currently placeholder
     push fs
-    push bx
+    push si
 
-    xor bx, bx
-    mov fs, bx
+    call calculate_offset_to_fd_entry
+    jc .return
+    ; now fs:FDTable.allocated + si points to file table entry
 
     call _fat12_read
+    jc .return
 
-    pop bx
-    pop fs
-    retf
+    xor bx, bx
+    jmp .return
+
+    .error: mov bx, 0x1
+    .return:
+        pop si
+        pop fs
+        retf
 
 ; FDTable address:  0x0:0x0500
 ;                   fs: 0x0500

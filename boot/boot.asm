@@ -30,7 +30,7 @@ _start:
 
     xor bx, bx      ; 
     mov ss, bx      ; for stack we will use 0x0000 segment (only for kernel, userspace is gonna have a different stack)
-    mov sp, 0x7000  ; let's go 0x7000 as stack offset
+    mov sp, 0x8500  ; let's go 0x8500 as stack offset
     mov bp, sp      ; bp = sp, ofc
 
     ; we are ready so we are jumping to... the same code, BUT we are switching segments. The final goal is to save as much RAM as we can
@@ -75,6 +75,16 @@ _boot:
     push ax ; save file descriptor
 
     ; 3.2.  read COMMAND.COM (TODO!)
+    mov bx, ax
+    mov ah, 0x3f
+    mov cx, 0x600
+    mov dx, 0x2000
+    mov ds, dx
+    mov dx, 0x100
+    int 0x21
+    mov dx, cs
+    mov ds, dx
+    jc .command_com_load_error
 
     ; 3.3. close COMMAND.COM
     pop bx
@@ -83,21 +93,25 @@ _boot:
     jc _os_error
 
     ; 4. execute COMMAND.COM (TODO!)
+    mov bx, 0x2000
+    mov es, bx
+    mov ds, bx
+    call far [gs:command_com_addr]
     jmp .command_com_crash
 
     ; COMMAND.COM crash message
     .command_com_crash:
-    lea dx, [command_com_crashed_message]
+    mov dx, command_com_crashed_message
     jmp .print
 
     ; COMMAND.COM missing message
     .command_com_missing:
-    lea dx, [command_com_missing_message]
+    mov dx, command_com_missing_message
     jmp .print
 
     ; COMMAND.COM load error message
     .command_com_load_error:
-    lea dx, [command_com_load_error_message]
+    mov dx, command_com_load_error_message
 
     ; print
     .print:
@@ -123,7 +137,9 @@ error_message: db "System encountered an critical error and it cannot continue. 
 command_com_missing_message: db "COMMAND.COM is not present on the disk or disk is not accessible. System halted!", 0xD, 0xA, '$'
 command_com_crashed_message: db "COMMAND.COM unexpectedly exited. System halted!", 0xD, 0xA, '$'
 command_com_load_error_message: db "COMMAND.COM was not loadable. System halted!", 0xD, 0xA, '$'
-command_com: db "COMMAND COM", 0x0
+command_com: db "command.com", 0x0, '$'
+
+command_com_addr: dw 0x100, 0x2000
 
 %include 'boot/ivt.asm'
 %include 'boot/dynamic_call.asm'
