@@ -32,6 +32,10 @@ _fat12_open:
     mov di, ax
     mov cx, [fs:FAT12_DirEntry.Cluster + di]
     mov [fs:FDTable.fsReserved + si], cx
+
+    ; save file size
+    mov cx, [fs:FAT12_DirEntry.SizeInBytes + di] ; low 2 bytes, support for 64KB files gonna be added later
+    mov [fs:FDTable.fileSize + si], cx
     pop di
 
     pop cx
@@ -252,8 +256,8 @@ _fat12_search:
 ; ds:dx                         -> destination
 ; ds:dx                         <- data read
 _fat12_read:
-    push cx
     push dx
+    push cx
     push es
     push si
 
@@ -267,13 +271,6 @@ _fat12_read:
 
     ; start reading loop
     .read_cluster:
-        ; check cluster status
-        cmp ax, 0xff8   ; eof
-        jae .eof
-
-        cmp ax, 0xff7   ; bad
-        je .read_error
-
         push ax ; save cluster number for future calculations
         push dx ; save memory offset
         push cx ; save bytes count
@@ -294,8 +291,8 @@ _fat12_read:
         mov dx, ax ; lba = data sector
         mov bx, [fs:FAT12_SectorsPerCluster] ; bl = sectors per cluster
         call read_disk.lba ; read!
-        jc .read_error
         pop cx
+        jc .read_error
 
         ; offset memory: size of sector * sectors per cluster
         mov ax, [fs:FAT12_SizeOfSector]
@@ -322,30 +319,27 @@ _fat12_read:
 
         pop ax                          ; get active cluster
         call _fat12_get_next_cluster    ; get next cluster for that file
+        jc .ret
 
         jmp .read_cluster
-
-    .eof:
-        xor bx, bx
-
-        jmp .ret
-
     .all_read:
         call .copy_fat_buffer
 
         pop dx
         xor bx, bx
         jmp .ret
-    
-    .read_error:
-        mov bx, 0x1
-        jmp .ret
 
+    .read_error:
+        pop dx
+        pop ax
+        mov bx, 0x1
+        mov ax, 0x1e
+        jmp .ret
     .ret:
         pop si
         pop es
-        pop dx
         pop cx
+        pop dx
         ret
 
     ; ds:dx     -> destination
@@ -378,6 +372,87 @@ _fat12_read:
         add dx, cx
 
         ret
+
+; fs:FDTable.allocated + si     -> file table entry
+; cx                            -> n
+; _fat12_move_pointer:
+;     push ax
+;     push cx
+
+;     mov ax, [fs:FDTable.fsReserved + si]
+;     call _fat12_seek
+;     pop cx
+;     jc .nope
+
+;     push dx
+;     mov dx, [fs:FDTable.pointer + si]
+;     add dx, cx
+;     mov [fs:FDTable.pointer + si], dx
+;     pop dx
+
+;     xor bx, bx
+;     .nope:
+;     pop ax
+;     ret
+
+; todo!
+; ax        -> first cluster
+; cx        -> file pointer
+; ax <-     cluster
+; cx <-     offset
+; _fat12_seek:
+;     push si
+;     push dx
+;     push dx
+;     push ax
+;     push cx ; file pointer
+
+;     ; get size of cluster in bytes: sectors per cluster * sector size
+;     mov ax, [fs:FAT12_SectorsPerCluster]
+;     mov cx, [fs:FAT12_SizeOfSector]
+;     mul cx      
+;     xor dx, dx  ; cx = size of cluster in bytes
+;     push ax
+
+;     ; we need to know how many clusters we need to skip
+;     ; file pointer / cluster size = clusters to skip (ax), offset in cluster (dx)
+;     mov cx, ax  ; cx = cluster size
+;     pop bx
+;     pop ax      ; ax = file pointer
+;     div cx      ; ax = clusters to skip, dx = offset in cluster
+
+;     mov cx, ax  ; cx = cluster counter
+;     pop ax      ; ax = current cluster
+;     push dx
+
+;     push bx
+
+;     xor bx, bx
+;     .skip_clusters:
+;         cmp cx, 0x0 ; nothing to skip
+;         jbe .skipped
+
+;         push ax
+;         call _fat12_get_next_cluster ; ax = next cluster
+;         pop dx ; previous cluster
+;         jc .skipped
+        
+;         dec cx
+;         jmp .skip_clusters
+
+;     .skipped:
+;         pop si  ; size of cluster
+;         pop cx  ; offset
+
+;         pop bx  ; first cluster
+;         cmp ax, 0x0 ; that means eof
+;         jne .no_eof
+
+;     .no_eof:
+;         pop dx
+;         pop si
+
+;         ret
 
 ; ax    -> current cluster
 ; ax    <- next cluster
@@ -418,7 +493,7 @@ _fat12_get_next_cluster:
     pop es
     pop bx ; get entry offset
     pop cx ; restore info about active cluster
-    jc .error
+    jc .read_error
 
     ; get cluster information
     mov ax, [fs:FAT12_Buffer + bx] ; ax contains cluster info
@@ -429,13 +504,33 @@ _fat12_get_next_cluster:
 
     ; odd cluster needs to have 4 shifted
     shr ax, 0x4
-    jmp .ret
+    jmp .check
 
     .even: ; even cluster only needs to have first 4 bits zeroed
     and ax, 0xfff
-    jmp .ret
+    jmp .check
 
-    .error: stc
+    .read_error:
+        mov ax, 0x1e
+        mov bx, 0x1
+        stc
+        jmp .ret
+    
+    .eof:
+        mov ax, 0x0
+        xor bx, bx
+        stc
+        jmp .ret
+
+    .check:
+        ; check cluster status
+        cmp ax, 0xff8   ; eof
+        jae .eof
+
+        cmp ax, 0xff7   ; bad
+        je .read_error
+
+        xor bx, bx
     .ret:
         pop cx
         pop dx

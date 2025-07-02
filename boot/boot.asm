@@ -17,7 +17,7 @@ _start:
     mov si, ax      ; si = source offset
     ; source address = ds:si
 
-    mov cx, 0x1000  ; we want to copy whole memory segment (4096/0x1000 bytes)
+    mov cx, KERNEL_SIZE  ; we want to copy whole memory segment (64KB)
     cld             ; clear direction flag
     rep movsb       ; MAGIC!!!!
 
@@ -33,8 +33,12 @@ _start:
     mov sp, 0x8500  ; let's go 0x8500 as stack offset
     mov bp, sp      ; bp = sp, ofc
 
-    ; we are ready so we are jumping to... the same code, BUT we are switching segments. The final goal is to save as much RAM as we can
-    jmp 0x1000:0x50 ; 0x1000 (destination segment) x 0x10 + 0x50 (kernel main code offset)
+    ; we are ready so we are farjumping to... the same code, BUT we are switching segments. The final goal is to save as much RAM as we can
+    mov bx, 0x1000
+    push bx
+    mov bx, _boot
+    push bx
+    retf
 halt:
     hlt
     jmp halt
@@ -43,15 +47,19 @@ times 0x50 - ($ - $$) db 0
 
 ; here is the main kernel code
 _boot:
-    ; first we are going to set up interrupts
+    ; save drive number
     push dx
+
+    ; get size of available RAM in paragraphs (16 bytes blocks)
+    call get_ram_size
+
+    ; first we are going to set up interrupts
     call ivt_setup
  
     ; let's print some random message to check if display_string interrupt work (the same usage as in regular DOS)
     mov ah, 0x9
     lea dx, [startup_message]
     int 0x21
-    pop dx
 
     ; boot procedure explained:
     ; 1. set default drive
@@ -60,47 +68,20 @@ _boot:
     ; 4. execute COMMAND.COM
 
     ; 1. get information about the drive we booted from and set it as default
+    pop dx          ; restore drive number
     call set_drive
     jc _os_error
 
     ; 2. load drivers (TODO!)
 
-    ; 3.    load COMMAND.COM
-    ; 3.1.  open COMMAND.COM
-    mov ah, 0x3d
+    ; 3. execute COMMAND.COM
+    mov ah, 0x4b
     mov al, 0x0
     lea dx, [command_com]
     int 0x21
-    jc .command_com_missing
-    push ax ; save file descriptor
-
-    ; 3.2.  read COMMAND.COM (TODO!)
-    mov bx, ax
-    mov ah, 0x3f
-    mov cx, 0x600
-    mov dx, 0x2000
-    mov ds, dx
-    mov dx, 0x100
-    int 0x21
-    mov dx, cs
-    mov ds, dx
     jc .command_com_load_error
 
-    ; 3.3. close COMMAND.COM
-    pop bx
-    mov ah, 0x3e
-    int 0x21
-    jc _os_error
-
-    ; 4. execute COMMAND.COM (TODO!)
-    mov bx, 0x2000
-    mov es, bx
-    mov ds, bx
-    call far [gs:command_com_addr]
-    jmp .command_com_crash
-
     ; COMMAND.COM crash message
-    .command_com_crash:
     mov dx, command_com_crashed_message
     jmp .print
 
@@ -133,15 +114,20 @@ _os_error:
 
 ; DOS-like boot message
 startup_message: db 0xA, "Starting...", 0xD, 0xA, 0xA, '$'
-error_message: db "System encountered an critical error and it cannot continue. Sorry...", 0xD, 0xA, '$'
-command_com_missing_message: db "COMMAND.COM is not present on the disk or disk is not accessible. System halted!", 0xD, 0xA, '$'
-command_com_crashed_message: db "COMMAND.COM unexpectedly exited. System halted!", 0xD, 0xA, '$'
-command_com_load_error_message: db "COMMAND.COM was not loadable. System halted!", 0xD, 0xA, '$'
+error_message: db "BOOT.SYS: System encountered an critical error and it cannot continue. Sorry...", 0xD, 0xA, '$'
+command_com_missing_message: db "BOOT.SYS: COMMAND.COM is not present on the disk or disk is not accessible. System halted!", 0xD, 0xA, '$'
+command_com_crashed_message: db "BOOT.SYS: COMMAND.COM unexpectedly exited. System halted!", 0xD, 0xA, '$'
+command_com_load_error_message: db "BOOT.SYS: COMMAND.COM was not loadable. System halted!", 0xD, 0xA, '$'
 command_com: db "command.com", 0x0, '$'
 
 command_com_addr: dw 0x100, 0x2000
 
 %include 'boot/ivt.asm'
 %include 'boot/dynamic_call.asm'
+%include 'boot/mem.asm'
 %include 'boot/basic_io.asm'
 %include 'boot/disks.asm'
+%include 'boot/exec.asm'
+
+KERNEL_SIZE         equ ($ - $$)
+FIRST_FREE_BLOCK    equ (KERNEL_SIZE / 0x10) + 0x1 + 0x1000

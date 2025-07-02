@@ -142,6 +142,24 @@ read_file: ; currently placeholder
         pop fs
         retf
 
+; not compatible with other DOS-es
+; ah        -> 0x42
+; bx        -> fd
+; cx        -> n
+move_pointer:
+    push fs
+    push si
+
+    call calculate_offset_to_fd_entry
+    jc .return
+
+    ; call _fat12_move_pointer
+
+    .return:
+        pop si
+        pop fs
+        retf
+
 ; FDTable address:  0x0:0x0500
 ;                   fs: 0x0500
 FDTable                     equ 0x0500
@@ -149,7 +167,8 @@ FDTable                     equ 0x0500
     FDTable.pointer         equ FDTable.allocated +     0x1 ; 2 bytes
     FDTable.mode            equ FDTable.pointer +       0x2 ; 1 byte
     FDTable.filesystem      equ FDTable.mode +          0x1 ; 1 byte
-    FDTable.fsReserved      equ FDTable.filesystem +    0x1 ; 8 bytes
+    FDTable.fileSize        equ FDTable.filesystem +    0x1 ; 2 bytes, we don't support files larger than 64KB (at least now)
+    FDTable.fsReserved      equ FDTable.fileSize +      0x2 ; 8 bytes
     FDTable.end             equ FDTable.fsReserved +    0x8 ; end
 
 FDTableEntrySize    equ FDTable.end - FDTable

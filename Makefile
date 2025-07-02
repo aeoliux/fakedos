@@ -19,7 +19,7 @@ disk.img: all
 	umount /mnt
 
 qemu: disk.img
-	qemu-system-i386 -fda disk.img ${QEMU_ARGS}
+	qemu-system-i386 -m 1M -fda disk.img ${QEMU_ARGS}
 
 clean:
 	find . -name '*.bin' -delete
