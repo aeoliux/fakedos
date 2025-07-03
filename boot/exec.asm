@@ -7,7 +7,7 @@
 ;
 ; -------------------------------
 ;
-;   Program's code (up to 64KB, whole segment)
+;   Program's code (up to 64KB - 256B, whole segment)
 ;
 ; -------------------------------
 ; 
@@ -20,14 +20,19 @@
 ; ah        -> 0x4b
 ; al        -> 00h
 ; ds:dx     -> path
+; es:bx     -> execution parameter block
 ; al <-     return code
 execute:
+    mov [.temp], bx
+
     ; open file
     mov ah, 0x3d
     mov al, 0x0
     int 0x21
     jc .error
     push ax     ; save fd for next operations
+    push di
+
     mov bx, ax  ; store fd in bx
 
     push cx
@@ -66,6 +71,45 @@ execute:
     pop bx ; restore fd to bx
     jc .allocate_error
 
+    ; copy command line args + TODO env
+    push bx
+    push cx
+    push ds
+    push es
+    push si
+    push di
+
+    ; [es:di + 2] = far pointer to cmdline
+    ; ax:0x80 = destination cmdline
+
+    mov di, [.temp]
+    lds si, [es:di + 2]
+    ; ds:si = far pointer to cmdline
+    mov bx, ds
+    cmp bx, 0x0
+    je .no_cmdline      ; each program is loaded at specific segment, so segment 0x0 means there is no cmdline
+    xor ch, ch
+    mov cl, [ds:si + 1] ; [ds:si + 1] = length of cmdline
+    cmp cl, 0x0
+    je .no_cmdline      ; length 0 means there is no cmdline
+    add cx, 0x2         ; copy with length and max length too
+
+    ; set up es:di as programSegment:0x80
+    mov es, ax
+    mov di, 0x80
+
+    ; cx contains length, so clear direction flag and copy bytes
+    cld
+    rep movsb
+
+    .no_cmdline:
+    pop di
+    pop si
+    pop es
+    pop ds
+    pop cx
+    pop bx
+
     ; ax = block segment
     ; bx = fd
     ; cx = file size
@@ -82,11 +126,12 @@ execute:
     pop dx
     pop ds
     pop ax
-    jc .allocate_error
-
     pop cx
-    ; close file
+    pop di
     pop bx
+    jc .error
+
+    ; close file
     push ax
     mov ah, 0x3e
     int 0x21
@@ -111,6 +156,10 @@ execute:
     mov fs, ax
     mov gs, ax
 
+    ; save current SS:SP in PSP at offset 0x2e
+    mov [es:0x2e], sp
+    mov [es:0x30], ss
+
     ; set up call address
     ; we call program by farreturning....
     ; retf = pop ip -> pop cs -> continue at cs:ip
@@ -118,12 +167,9 @@ execute:
     ; and then we push segment and offset of program's code
     ; so once we do retf, cpu will execute program's code
     ; and when program does retf it will go back here
-    push cs                 ; stack = this seg
-    mov bx, .here_back
-    push bx                 ; stack = this seg, this off
-    push ax                 ; stack = this seg, this off, prog seg
+    push es                 ; stack = prog seg
     mov bx, 0x100
-    push bx                 ; stack = this seg, this off, prog seg, prog off (0x100)
+    push bx                 ; stack = prog seg, prog off (0x100)
 
     ; clear registers before execution
     xor ax, ax
@@ -135,6 +181,7 @@ execute:
     retf                    ; ip = pop = prog off -> cs = pop = prog seg => jumps to programs code
                             ; now: once program exits or retf will execute again
                             ; ip = pop = this off -> cs = pop = this seg => goes back to this code
+
     .here_back:
     call restore_previous_stack
 
@@ -166,6 +213,7 @@ execute:
         pop si
         pop fs
         pop cx
+        pop di
         pop ax
         jmp .error
     
@@ -184,9 +232,16 @@ execute:
 ; ah        -> 0x4c
 ; al        -> exit code
 exit:
-    pop bx
-    pop bx  ; we don't need interrupt return segment and offset
-    pop bx
+    pop bx  ; ip
+    pop es  ; cs
+    popf    ; eflags
+
+    ; es = program's cs
+    ; restore stack to its initial position
+    lss sp, [es:0x2e] ; ss = es:0x2e + 2, sp = es:0x2e
 
             ; assuming stack is the same (we don't know but we just want it to exit, all checks and stuff like that will be added later)
-    retf
+    push cs                 ; set up return address
+    mov bx, execute.here_back
+    push bx
+    retf                    ; return to program executor

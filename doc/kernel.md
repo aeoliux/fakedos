@@ -1,6 +1,9 @@
 # FakeDOS - kernel
 WIP DOS-like kernel `BOOT.SYS`.
 
+## Be careful!
+Currently kernel does not have a memory deallocator. Every program executed is loaded higher than previous. Finally you will get an error about insufficient memory. Not because you don't have it, but because the memory is not freed after use. **Deallocator is next step in development!**
+
 ## What it does?
 1. Copies itself from `0x2000:0x0000` to `0x1000:0x0000`.
 2. Sets up segment registers to `0x1000:0x0000`.
@@ -9,7 +12,7 @@ WIP DOS-like kernel `BOOT.SYS`.
 5. Gets RAM size.
 6. Sets up basic interrupts: `0x21`.
 7. Prints startup message.
-8. Sets default drive to that kernel is booted from.
+8. Detects floppy disks and sets default drive to that kernel is booted from.
 9. Loads drivers (TODO!).
 10. Executes `COMMAND.COM` from FAT12 filesystem.
 11. If `COMMAND.COM` quits, kernel displays message about system crash.
@@ -18,7 +21,7 @@ WIP DOS-like kernel `BOOT.SYS`.
 ## How it works?
 ### Program execution
 #### Binary format
-- FakeDOS currently supports raw binary format similar to `.COM` files, but without PSP (Program Segment Prefix).
+- FakeDOS currently supports raw binary format similar to `.COM` files, but with very simple PSP (only the most necessary kernel's data).
 - Binary needs to be offsetted to `0x100` (just like in DOS).
 - Every program must have exit directive at the end of the execution. It can be
 ```asm
@@ -26,10 +29,10 @@ mov ah, 0x4c
 mov al, <exit code>
 int 0x21
 
-; OR
+OR
 
-mov al, <exit code>
-retf ; yeah, regular far return works
+mov al, 0x0
+int 0x20
 ```
 #### How to execute?
 Command line arguments and environment variables are not supported (but they will be).
@@ -50,19 +53,21 @@ program_path: db "command.com", 0x0
 #### How kernel executes program?
 1. Opens program's file as read-only.
 2. Gets its size.
-3. Allocates memory block (each block is built from paragraphs, 1 paragraph = 16 bytes). Blocks size is set to hold whole executable + 4KB stack (in the future stack size will be configurable in `CONFIG.SYS`).
+3. Allocates memory block (each block is built from paragraphs, 1 paragraph = 16 bytes). Blocks size is set to hold PSP (256B) + whole executable + 4KB stack (in the future stack size will be configurable in `CONFIG.SYS`).
 4. Reads whole executable (limit is 64KB - 256B) into newly allocated memory block.
 5. Pushes whole CPU state (registers and flags) onto the stack.
 6. Sets segment registers.
 7. Sets new stack and stores in it an address of the old stack. This causes stacks to be connected like a chain.
-8. Performs a far call by using `retf` (it pushes return's and program's addresses onto new stack).
-9. **Program is being executed**
-10. Once program exits, code control is returned to the kernel.
-11. Restores old stack (its address is saved in the new stack).
-12. Restores previous CPU state (registers and flags).
-13. Deallocates memory used by that program (TODO!).
-13. Gives code control back to interrupt caller.
+8. Sets program's initial stack address in the PSP.
+9. Performs a far call by using `retf` (it pushes program's addresses onto new stack).
+10. **Program is being executed**
+11. Once program exits, code control is returned to the kernel.
+12. Restores old stack (its address is saved in the new stack).
+13. Restores previous CPU state (registers and flags).
+14. Deallocates memory used by that program (TODO!).
+15. Gives code control back to interrupt caller.
 #### How exiting works?
 1. Making interrupt causes flags, return address to be pushed onto the stack.
-2. `exit` interrupt pops all of those values from the stack, so on the stack now there are only program executor's return address and address of previous stack.
-3. Now `exit` interrupt just calls `retf` and code is returned to program executor at point no. 10.
+2. To determine which program has called `exit`, it pops return address from the stack. Return address is segment+offset, so kernel knows which program performed `exit` operation. Obtained segment points to program's PSP.
+3. Now program's initial stack is restored based on the information from PSP (that's how stack safety works).
+4. Kernel sets return address to program executor at point no. 11 and `retf` is executed. Code control is returned to program executor.

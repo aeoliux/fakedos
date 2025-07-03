@@ -554,7 +554,6 @@ _fat12_initialize:
     ; read 1 sector
     mov bl, 0x1
     call read_disk.lba
-
     jc .error
 
     ; n of reserved sectors = first fat LBA

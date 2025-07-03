@@ -52,14 +52,19 @@ _boot:
 
     ; get size of available RAM in paragraphs (16 bytes blocks)
     call get_ram_size
-
+    
     ; first we are going to set up interrupts
     call ivt_setup
- 
+    
     ; let's print some random message to check if display_string interrupt work (the same usage as in regular DOS)
     mov ah, 0x9
     lea dx, [startup_message]
     int 0x21
+    
+    ; scan all drives
+    pop dx
+    push dx
+    call scan_drives
 
     ; boot procedure explained:
     ; 1. set default drive
@@ -68,16 +73,17 @@ _boot:
     ; 4. execute COMMAND.COM
 
     ; 1. get information about the drive we booted from and set it as default
-    pop dx          ; restore drive number
-    call set_drive
-    jc _os_error
+    pop dx          ; restore drive number\
+    ; call set_drive
+    ; jc _os_error
 
-    ; 2. load drivers (TODO!)
+    ; ; 2. load drivers (TODO!)
 
     ; 3. execute COMMAND.COM
     mov ah, 0x4b
     mov al, 0x0
     lea dx, [command_com]
+    lea bx, [command_com_epb]
     int 0x21
     jc .command_com_load_error
 
@@ -119,6 +125,12 @@ command_com_missing_message: db "BOOT.SYS: COMMAND.COM is not present on the dis
 command_com_crashed_message: db "BOOT.SYS: COMMAND.COM unexpectedly exited. System halted!", 0xD, 0xA, '$'
 command_com_load_error_message: db "BOOT.SYS: COMMAND.COM was not loadable. System halted!", 0xD, 0xA, '$'
 command_com: db "command.com", 0x0, '$'
+command_com_epb:        dw 0x0          ; env
+                        dw 0x0          ; cmdline offset
+                        dw 0x0          ; cmdline segment
+                        dw 0x0, 0x0     ; fcb (NOT SUPPORTED)
+
+
 
 command_com_addr: dw 0x100, 0x2000
 

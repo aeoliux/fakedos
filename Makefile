@@ -1,4 +1,4 @@
-all: vbr/vbr.bin boot/boot.sys command/command.com
+all: vbr/vbr.bin boot/boot.sys command/command.com command/hello.com
 
 %.bin: %.asm
 	nasm -f bin -o $@ $^
