@@ -50,12 +50,47 @@ execute_cmd:
     mov al, 0x0
     mov [si + bx], al
 
+    push ax
+    mov ah, 0x6d
+    int 0x21
+    mov [memory_used], ax
+    pop ax
+
     mov ah, 0x4b
     mov al, 0x0
     lea bx, [binary_ebp]
     int 0x21
 
+    push ax
+    push bx
+    mov ah, 0x6d
+    int 0x21
+    mov bx, [memory_used]
+    cmp ax, bx
+    ja .memleak_detected
+    .here_back:
+    pop bx
+    pop ax
+
     ret
+
+    .memleak_detected:
+    mov ah, 0x9
+    lea dx, [memleak_msg]
+    int 0x21
+
+    clc
+    jmp .here_back
+
+    memory_used: dw 0x0
+
+memleak_msg:    db 0xA, 0xD
+                db "Memory usage before execution does not match memory usage after execution!", 0xA, 0xD
+                db "It can be either a memory leak or program freed too much memory.", 0xA, 0xD
+                db "You can continue using your computer, but it is recommended to reboot.", 0xA, 0xD
+                db "This can prevent any memory corruption during this session.", 0xA, 0xD, '$'
+
+execution_error: db "Failed to execute program", 0xA, 0xD, '$'
 
 binary_ebp: dw 0x0      ; env
             dw cmdline  ; cmdline offset

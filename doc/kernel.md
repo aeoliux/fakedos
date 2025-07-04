@@ -2,7 +2,7 @@
 WIP DOS-like kernel `BOOT.SYS`.
 
 ## Be careful!
-Currently kernel does not have a memory deallocator. Every program executed is loaded higher than previous. Finally you will get an error about insufficient memory. Not because you don't have it, but because the memory is not freed after use. **Deallocator is next step in development!**
+Every program must deallocate manually each memory block it allocates at the runtime. If it does not, this can cause stack and program's code not to deallocate properly. Memory model used in this kernel is very primitive: memory blocks are stacked on top of each other and they are connected in chain, so to properly free blocks before an allocated block. This allocated block must be freed too, however kernel has freeing queue implemented, so you don't need to free memory in specific order (but it is recommended). **All you need to do is just to free all blocks you have allocated.**
 
 ## What it does?
 1. Copies itself from `0x2000:0x0000` to `0x1000:0x0000`.
@@ -63,9 +63,10 @@ program_path: db "command.com", 0x0
 10. **Program is being executed**
 11. Once program exits, code control is returned to the kernel.
 12. Restores old stack (its address is saved in the new stack).
-13. Restores previous CPU state (registers and flags).
-14. Deallocates memory used by that program (TODO!).
-15. Gives code control back to interrupt caller.
+13. Deallocates old stack.
+14. Restores previous CPU state (registers and flags).
+15. Deallocates memory block containing program's code (deallocating blocks allocated by that program has not been implemented yet).
+16. Gives code control back to interrupt caller.
 #### How exiting works?
 1. Making interrupt causes flags, return address to be pushed onto the stack.
 2. To determine which program has called `exit`, it pops return address from the stack. Return address is segment+offset, so kernel knows which program performed `exit` operation. Obtained segment points to program's PSP.

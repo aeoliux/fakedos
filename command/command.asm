@@ -20,23 +20,32 @@ _start:
         int 0x21
 
         ; print newline
-        push dx
         mov ah, 0x9
         lea dx, [newline]
         int 0x21
-        pop dx
 
         ; execute command
         xor ch, ch
         mov cl, [cmdbuffer + 1] ; cmdbuffer + 1 = length of input
-                                ; we store it at cx, because it's parameter to execute_cmd function
-        add dx, 0x2
+                                ; we store it at cx, because it's parameter to execute_cmd function]
+        cmp cl, 0x1
+        je .prompt_loop
+        lea dx, [cmdbuffer + 2]
         call execute_cmd
+        pushf                   ; preserve error
+
+        ; show newline
+        mov ah, 0x9
+        lea dx, [newline]
+        int 0x21
+
+        popf                    ; restore CF (error indicator)
         jnc .prompt_loop        ; if no error, just go back to prompt
 
         mov ah, 0x9
         lea dx, [bad_command_or_filename]
         int 0x21
+
         jmp .prompt_loop
 
         ; yes, of course we can jump back to _start and have one label,

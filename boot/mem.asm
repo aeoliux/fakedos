@@ -3,10 +3,10 @@ OptimalStackSize:           dw 0x0
 OptimalStackSizeInBytes:    dw 0x0
 
 PreviousAllocatedBlock:         dw 0x0                  ; previous allocated block
-FirstFreeSegment:               dw FIRST_FREE_BLOCK     ; last used memory segment
+FirstFreeSegment:               dw FIRST_FREE_BLOCK + 1 ; last used memory segment
 
 MemBlock            equ 0x0
-MemBlock.allocated  equ MemBlock                    ; 2 bytes, 0xffff = yes, 0xfffe = new executable, else = no
+MemBlock.allocated  equ MemBlock                    ; 2 bytes, 0xffff = yes, 0xfffe = new executable, 0xfffd = deallocated but not freed, else = no
 MemBlock.blockSize  equ MemBlock.allocated + 0x2    ; 2 bytes
 MemBlock.previous   equ MemBlock.blockSize + 0x2    ; 2 bytes (previous block segment)
 
@@ -87,12 +87,17 @@ restore_previous_stack:
     pop bx  ; previous stack segment
     pop ax  ; this stack segment
 
-    ; now new stack is empty, deallocate it (TODO!)
-
     ; restore previous stack
     mov sp, cx
     mov bp, sp
     mov ss, bx
+
+    ; deallocate old stack
+    push es
+    mov es, ax
+    push cs
+    call deallocate_blocks
+    pop es
 
     push dx ; set return address
     ret
@@ -164,3 +169,105 @@ internal_allocate:
     .return:
 
     ret
+
+; es        -> segment
+; es <-     segment to mem block's header
+; (CF) <-   1 = not allocated/deallocated and not freed, 0 = allocated
+; ax <-     if CF == 1, ax = 0 = not allocated or ax = 1 = deallocated and not freed, else ax = 2
+check_allocation:
+    mov bx, es
+    dec bx
+    mov es, bx  ; mem block header segment
+
+    mov ax, [es:MemBlock.allocated]
+    cmp ax, 0xfffe
+    jae .allocated
+
+    cmp ax, 0xfffd
+    stc
+    mov ax, 0x1 ; deallocated not freed
+    je .return
+
+    mov ax, 0x0 ; not allocated
+    jmp .return
+
+    .allocated:
+    mov ax, 0x2 ; allocated
+
+    .return:
+    ret
+
+; es        -> segment
+deallocate_blocks:
+    push es ; set up segment
+
+    ; check if block is allocated
+    call check_allocation
+    jc .not_valid_memblock
+    ; es now points to memory block header
+
+    ; check if there is a block after it
+    push es
+    mov ax, [es:MemBlock.blockSize] ; block size
+    mov bx, es
+    add bx, 0x2
+    add bx, ax
+    mov es, bx  ; es = es + 2 headers + block size = points to new block
+
+    call check_allocation   ; check if that block is allocated
+    pop es
+    cmp ax, 0x2             ; if ax = 0x2 or ax = 0x1, there are blocks after this
+    je .block_after
+    cmp ax, 0x1
+    je .block_after
+
+    ; so this is last block in chain, let's free previous blocks
+    mov ax, es
+    mov [gs:FirstFreeSegment], ax
+
+    mov ax, [es:MemBlock.previous]
+    mov [gs:PreviousAllocatedBlock], ax
+
+    push es
+    .loop:
+        cmp ax, 0x0
+        je .break                       ; there is no previous block then
+        mov es, ax                      ; set it as segment to allocation checker
+        call check_allocation           ; check block allocation
+        cmp ax, 0x1                     ; check if it deallocated
+        jne .break                      ; if not, that's the end of chain of deallocated blocks
+
+        ; free block
+        mov ax, 0x0
+        mov [es:MemBlock.allocated], ax ; block freed
+
+        mov ax, es
+        mov [gs:FirstFreeSegment], ax   ; decrease used memory
+
+        mov ax, [es:MemBlock.previous]
+        mov [gs:PreviousAllocatedBlock], ax
+
+        jmp .loop
+
+    .break:
+    pop es
+    mov ax, 0x0
+    mov [es:MemBlock.allocated], ax ; free block
+
+    jmp .not_valid_memblock ; everything freed
+
+    .block_after:   ; if there is a block after that release it, we need to mark this block as deallocated
+                    ; so once all blocks after it get released, all blocks marked as deallocated will get freed too
+    mov ax, 0xfffd  ; 0xfffd = deallocated but not freed
+    mov [es:MemBlock.allocated], ax
+
+    .not_valid_memblock:
+    pop es
+    retf
+
+; ah        -> 0x6d
+; ax <-     used mem in segments
+get_used_mem:
+    mov ax, [gs:FirstFreeSegment]
+
+    retf

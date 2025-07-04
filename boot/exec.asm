@@ -193,7 +193,12 @@ execute:
     popf
     popa
 
-    ; now deallocate block, ax = block (gonna be added later)
+    ; now deallocate block, ax = block
+    push es
+    mov es, ax
+    push cs
+    call deallocate_blocks
+    pop es
 
     xor bx, bx
     xor ah, ah
