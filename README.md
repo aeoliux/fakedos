@@ -8,7 +8,10 @@ make clean qemu # AS ROOT, volume needs to be mounted in order to copy all files
 ```
 Once `COMMAND.COM` shows prompt, you can type something, but only works:
 ```
-command.com
-hello.com
-hello.com <with some command line arguments>
+command.com                                     # default command interpreter
+hello.com                                       # "Hello world!"
+hello.com <with some command line arguments>    # "Hello world!" + displays provided cmdline args
+allctst.com                                     # checks if memory allocation and deallocation works
+allctst.com <random cmdline>                    # checks if memory allocation and deallocation works
+                                                # + leaks memory on purpose to show how the OS handles it
 ```

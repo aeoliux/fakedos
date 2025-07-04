@@ -184,17 +184,19 @@ check_allocation:
     jae .allocated
 
     cmp ax, 0xfffd
+    je .deallocated
+    
+    mov ax, 0x0 ; not allocated
+    stc
+    ret
+
+    .deallocated:
     stc
     mov ax, 0x1 ; deallocated not freed
-    je .return
-
-    mov ax, 0x0 ; not allocated
-    jmp .return
+    ret
 
     .allocated:
     mov ax, 0x2 ; allocated
-
-    .return:
     ret
 
 ; es        -> segment

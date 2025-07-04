@@ -23,7 +23,7 @@
 ; es:bx     -> execution parameter block
 ; al <-     return code
 execute:
-    mov [.temp], bx
+    mov [gs:.temp], bx
 
     ; open file
     mov ah, 0x3d
@@ -82,7 +82,7 @@ execute:
     ; [es:di + 2] = far pointer to cmdline
     ; ax:0x80 = destination cmdline
 
-    mov di, [.temp]
+    mov di, [gs:.temp]
     lds si, [es:di + 2]
     ; ds:si = far pointer to cmdline
     mov bx, ds
@@ -101,8 +101,15 @@ execute:
     ; cx contains length, so clear direction flag and copy bytes
     cld
     rep movsb
+    jmp .cmdline_done
 
+    ; if no cmdline, set length to zero
     .no_cmdline:
+    mov es, ax
+    mov bx, 0x0
+    mov [es:0x81], bx ; set cmdline length to zero
+
+    .cmdline_done:
     pop di
     pop si
     pop es

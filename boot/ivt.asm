@@ -244,5 +244,7 @@ a0x6a:	dw		0x0,				0x0
 a0x6b:	dw		0x0,				0x0
 a0x6c:	dw		0x0,				0x0
 
+; returns in ax how much memory is used measured in paragraphs (16 byte blocks)
+; divide by 16 to get memory usage in bytes
 f0x6d:  dw      get_used_mem,       0x1000
 ; to be filled later

@@ -4,6 +4,8 @@
 execute_cmd:
     mov si, dx                  ; ds:si = buffer
     xor bx, bx                  ; bx = iterator
+    mov [binary_ebp + 2], bx    ; default no cmdline
+    mov [binary_ebp + 4], bx
     .split:
         mov al, [si + bx]       ; check for terminations
         cmp al, ' '             ; spacebar means there are some cmdline args
@@ -34,6 +36,8 @@ execute_cmd:
     sub cx, bx  ; cx = length of cmdline - 1
     inc cx
 
+    lea ax, [cmdline]
+    mov [binary_ebp + 2], ax
     mov ax, cs
     mov [cmdline + 0x1], cl         ; save length
     mov [binary_ebp + 0x4], ax      ; save current segment
@@ -100,7 +104,7 @@ memleak_msg:    db 0xA, 0xD
 execution_error: db "Failed to execute program", 0xA, 0xD, '$'
 
 binary_ebp: dw 0x0      ; env
-            dw cmdline  ; cmdline offset
+            dw 0x0      ; cmdline offset
             dw 0x0      ; cmdline segment
             dw 0x0, 0x0 ; unused fcb
 cmdline:    db 0x40, 0x0
