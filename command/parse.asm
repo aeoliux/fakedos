@@ -48,33 +48,40 @@ execute_cmd:
 
     .found_executable:
     mov al, 0x0
-    mov [si + bx], al
+    mov [si + bx], al               ; put nullbyte at the end of the executable's path
 
+    ; save memory usage
     push ax
     mov ah, 0x6d
     int 0x21
     mov [memory_used], ax
     pop ax
 
+    ; execute command
     mov ah, 0x4b
     mov al, 0x0
     lea bx, [binary_ebp]
     int 0x21
+    pushf ; save error indicator (CF)
 
+    ; get current memory usage and check if it is different than before execution
     push ax
     push bx
     mov ah, 0x6d
     int 0x21
     mov bx, [memory_used]
-    cmp ax, bx
+    cmp ax, bx              ; if memory usage now is different, it means we got a memleak or program freed too much memory
+                            ; but it might also be issue with kernel
     ja .memleak_detected
     .here_back:
     pop bx
     pop ax
 
+    popf ; restore flags
     ret
 
     .memleak_detected:
+    ; print message about memory leak
     mov ah, 0x9
     lea dx, [memleak_msg]
     int 0x21

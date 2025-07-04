@@ -28,9 +28,9 @@ _start:
         xor ch, ch
         mov cl, [cmdbuffer + 1] ; cmdbuffer + 1 = length of input
                                 ; we store it at cx, because it's parameter to execute_cmd function]
-        cmp cl, 0x1
+        cmp cl, 0x1             ; if there are 0 characters, skip and prompt again
         je .prompt_loop
-        lea dx, [cmdbuffer + 2]
+        lea dx, [cmdbuffer + 2] ; load pointer to command
         call execute_cmd
         pushf                   ; preserve error
 
@@ -42,6 +42,7 @@ _start:
         popf                    ; restore CF (error indicator)
         jnc .prompt_loop        ; if no error, just go back to prompt
 
+        ; if there is, show famous DOS error
         mov ah, 0x9
         lea dx, [bad_command_or_filename]
         int 0x21
